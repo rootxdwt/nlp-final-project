@@ -1,0 +1,3 @@
+# Minimum dependencies for the example implementation.
+# Teams may append any free/open-source model and tooling dependencies.
+openai>=1.66,<3

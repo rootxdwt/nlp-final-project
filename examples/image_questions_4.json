@@ -1,0 +1,18 @@
+[
+  {
+    "type": "image",
+    "image_path": "examples/images/question_01_vocabulary.png"
+  },
+  {
+    "type": "image",
+    "image_path": "examples/images/question_02_accounting.jpeg"
+  },
+  {
+    "type": "image",
+    "image_path": "examples/images/question_03_math.jpg"
+  },
+  {
+    "type": "image",
+    "image_path": "examples/images/question_04_english_reading.jpg"
+  }
+]
