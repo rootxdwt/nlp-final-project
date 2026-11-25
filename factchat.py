@@ -31,7 +31,7 @@ class FactChat:
             api_key=api_key,
             base_url=BASE_URL,
             timeout=120.0,
-            max_retries=2,
+            max_retries=0,
         )
 
     def ask(self, system_prompt: str, question: Question, instruction: str = "") -> str:

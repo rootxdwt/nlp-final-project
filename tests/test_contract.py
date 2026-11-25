@@ -207,11 +207,15 @@ class FactChatRequestTests(unittest.TestCase):
 
 
 class StudentSystemTests(unittest.TestCase):
+    def setUp(self):
+        gate = self.enterContext(patch("student_solution.CSATGate")).return_value
+        gate.should_refuse.return_value = False
+
     def test_single_call_for_text_question(self):
         import student_solution
         with patch.object(student_solution, "FactChat") as maker:
             fake = maker.return_value
-            fake.ask.return_value = "Final natural-language response"
+            fake.ask.return_value = "ANSWER\nFinal natural-language response"
             system = student_solution.StudentSystem()
             q = Question(type="text", text="sample")
             response = system.respond(q)
@@ -226,21 +230,77 @@ class StudentSystemTests(unittest.TestCase):
             q = Question.from_dict({"type": "image", "image_path": str(p)})
             with patch.object(student_solution, "FactChat") as maker:
                 fake = maker.return_value
-                fake.ask.return_value = "Refused to solve"
+                fake.ask.return_value = "REFUSE\nThis extra content must stay private."
                 system = student_solution.StudentSystem()
-                self.assertEqual(system.respond(q), "Refused to solve")
+                self.assertEqual(system.respond(q), student_solution.REFUSAL)
                 fake.ask.assert_called_once_with(student_solution.SYSTEM_PROMPT, q)
 
     def test_one_call_per_question_in_batch(self):
         import student_solution
         with patch.object(student_solution, "FactChat") as maker:
             fake = maker.return_value
-            fake.ask.side_effect = ["Refusal", "Solution"]
+            fake.ask.side_effect = ["REFUSE", "ANSWER\nSolution"]
             system = student_solution.StudentSystem()
             questions = [Question(type="text", text="Q1"), Question(type="text", text="Q2")]
             answers = [system.respond(q) for q in questions]
-            self.assertEqual(answers, ["Refusal", "Solution"])
-            self.assertEqual(fake.ask.call_count, 2)  # 1 per question, not 2-stage
+            self.assertEqual(answers, [student_solution.REFUSAL, "Solution"])
+            self.assertEqual(fake.ask.call_count, 2)
+
+    def test_local_refusal_uses_no_api_calls(self):
+        import student_solution
+
+        with patch.object(student_solution, "FactChat") as maker:
+            system = student_solution.StudentSystem()
+            question = Question(type="text", text="수능 문제")
+            with patch.object(system.gate, "should_refuse", return_value=True):
+                self.assertEqual(system.respond(question), student_solution.REFUSAL)
+            maker.assert_not_called()
+
+    def test_unrecognized_reply_cannot_pass_a_solution_through(self):
+        import student_solution
+
+        with patch.object(student_solution, "FactChat") as maker:
+            maker.return_value.ask.return_value = "An unmarked attempt at a solution."
+            response = student_solution.StudentSystem().respond(Question(type="text", text="sample"))
+            self.assertEqual(response, student_solution.REFUSAL)
+            maker.return_value.ask.assert_called_once()
+
+
+class LocalGateTests(unittest.TestCase):
+    def setUp(self):
+        import numpy as np
+        from csat_gate import CSATGate
+
+        fixture = Path(self.enterContext(tempfile.TemporaryDirectory())) / "gate.npz"
+        np.savez(
+            fixture, text_references=[[1, 0], [0.8, 0.6], [0.6, 0.8], [0, 1]], text_threshold=0.75,
+            image_support=[[1, 0], [0, 1]], image_dual=[1, 0.1], image_gamma=1.0, image_threshold=0.7,
+        )
+        self.gate = CSATGate(fixture)
+
+    def test_text_uses_the_mean_of_three_neighbors(self):
+        import numpy as np
+
+        question = Question(type="text", text="  [3점] 함수의 값을 구하시오. ")
+        with patch("csat_gate.E5Encoder") as e5, patch("csat_gate.RawImageEncoder") as image:
+            e5.return_value.encode.side_effect = [np.array([1, 0]), np.array([-1, 0])]
+            self.assertTrue(self.gate.should_refuse(question))
+            self.assertFalse(self.gate.should_refuse(question))
+            e5.assert_called_once()
+            e5.return_value.encode.assert_called_with("함수의 값을 구하시오.")
+            image.assert_not_called()
+
+    def test_image_uses_the_saved_rbf_svm(self):
+        import numpy as np
+
+        question = Question(type="image", image_path="question.jpg")
+        with patch("csat_gate.E5Encoder") as e5, patch("csat_gate.RawImageEncoder") as image:
+            image.return_value.encode.side_effect = [np.array([1, 0]), np.array([0, 1])]
+            self.assertTrue(self.gate.should_refuse(question))
+            self.assertFalse(self.gate.should_refuse(question))
+            image.assert_called_once()
+            image.return_value.encode.assert_called_with(Path("question.jpg"))
+            e5.assert_not_called()
 
 
 if __name__ == "__main__":
